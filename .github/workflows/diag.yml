@@ -1,0 +1,20 @@
+name: Diagnose secrets
+on: workflow_dispatch
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    env:
+      T: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      A: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Check
+        run: |
+          echo "repo: $GITHUB_REPOSITORY"
+          echo "token len: ${#T}"
+          echo "account len: ${#A}"
+          if [ -n "$T" ]; then
+            curl -s -H "Authorization: Bearer $T" https://api.cloudflare.com/client/v4/user/tokens/verify
+          else
+            echo "TOKEN IS EMPTY"
+          fi
