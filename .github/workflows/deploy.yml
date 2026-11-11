@@ -1,7 +1,5 @@
 name: Deploy to Cloudflare Pages
 
-# 只有你 push 到 main（或手动触发）才会部署，不会在别人的 PR 上跑。
-# 使用前改两处：下面「Ensure Pages project exists」和「Deploy」里的 my-math（两处必须一致）。
 on:
   push:
     branches: [main]
@@ -17,11 +15,17 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      PROJECT: adrianstudy          # ← 只改这一行的项目名
     steps:
       - uses: actions/checkout@v4
 
-      # 与仓库 scripts/deploy-cf.sh 的打包清单一致：
-      # 只带 index.html / sw.js / manifest / assets / explore / diagnose / children + 5 个 JSON
+      - name: Preflight - who am I
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4.86.0 whoami
+
       - name: Stage static site
         run: |
           set -euo pipefail
@@ -35,16 +39,27 @@ jobs:
              data/questions.json data/id-aliases.json "$DIST/data/"
           echo "staged $(find "$DIST" -type f | wc -l) files, $(du -sh "$DIST" | cut -f1)"
 
-      # 项目已存在时这条会报错，|| true 忽略即可；真正的问题会由下一步暴露
-      - name: adrianstudy
+      - name: Create Pages project if missing
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx --yes wrangler@4.86.0 pages project create my-math --production-branch main || true
+        run: |
+          set -o pipefail
+          if npx --yes wrangler@4.86.0 pages project create "$PROJECT" --production-branch main > /tmp/create.log 2>&1; then
+            echo "created project $PROJECT"
+            cat /tmp/create.log
+          else
+            cat /tmp/create.log
+            if grep -qi "already exists" /tmp/create.log; then
+              echo "project already exists, continue"
+            else
+              echo "::error::project create failed, see log above"
+              exit 1
+            fi
+          fi
 
       - name: Deploy
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy ${{ runner.temp }}/dist --project-name adrianstudy --branch main
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4.86.0 pages deploy "$RUNNER_TEMP/dist" --project-name "$PROJECT" --branch main --commit-dirty=true
